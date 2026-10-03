@@ -236,6 +236,13 @@ struct SettingsView: View {
 
         GroupBox("Behavior") {
             VStack(alignment: .leading, spacing: 10) {
+                Toggle("Open on hover", isOn: $state.openOnHover)
+                    .help("Expand when the pointer enters the notch; close shortly after it leaves.")
+                Toggle("Keep expanded", isOn: $state.keepExpanded)
+                    .help("Keep the island open when the pointer leaves. Click outside to close it.")
+                Text("Click outside to close, even when kept expanded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Text("Close after")
                     TextField("60", value: $state.autoCloseInterval, format: .number)
@@ -243,6 +250,7 @@ struct SettingsView: View {
                         .frame(width: 64)
                     Text("s inactive")
                 }
+                .disabled(state.openOnHover || state.keepExpanded)
                 HStack(spacing: 8) {
                     Text("Hide after")
                     TextField("3", value: absenceMinutes, format: .number)

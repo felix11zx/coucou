@@ -148,6 +148,11 @@ If Coucou isn't running, the hook exits immediately: **Claude Code is never bloc
 
 ## Things to try
 
+On macOS, **Settings → General → Behavior** lets you choose **Open on hover**
+(enabled by default) and **Keep expanded**. Hover opens the full island; leaving
+closes it after a short grace period unless it is held open. Clicking outside the
+island closes it even when pinned, without answering a pending agent request.
+
 | Do this | Mochi does that |
 |---|---|
 | Hover the notch (top edge on Windows and Linux) | peeks out and says hi 👋 |

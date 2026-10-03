@@ -15,6 +15,8 @@ final class IslandWindowController: NSWindowController {
     private var frameTimer: Timer?
     private var keyMonitor: Any?
     private var viewSubscription: AnyCancellable?
+    private var behaviorSubscription: AnyCancellable?
+    private var outsideClickMonitors: [Any] = []
 
     // Confused recovery timer (set by handleDizzy)
     private var confusedRecoveryTimer: DispatchWorkItem?
@@ -140,6 +142,27 @@ final class IslandWindowController: NSWindowController {
         startPolling()
         startKeyMonitor()
         wireFSM()
+        startOutsideClickMonitors()
+        fsm.openOnHover = state.openOnHover
+        fsm.homeToPetitDelay = max(0, state.autoCloseInterval)
+        behaviorSubscription = Publishers.CombineLatest3(
+            state.$openOnHover, state.$keepExpanded, state.$autoCloseInterval
+        )
+        .dropFirst()
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] values in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let (openOnHover, keepExpanded, closeDelay) = values
+                self.fsm.openOnHover = openOnHover
+                self.fsm.homeToPetitDelay = max(0, closeDelay)
+                if keepExpanded && self.state.mode != .expanded {
+                    self.expand(to: self.defaultView())
+                } else if !self.wasInIsland {
+                    self.fsm.mouseLeft()
+                }
+            }
+        }
 
         // Make panel key whenever the prompt/chat view becomes active
         // (nonactivatingPanel never auto-becomes key, but TextField needs it)
@@ -199,7 +222,12 @@ final class IslandWindowController: NSWindowController {
             self?.fsm.greetComplete()
         }
 
-        fsm.isHeldOpen = { AppState.shared.pendingApproval != nil }
+        fsm.isHeldOpen = { [weak self] in
+            guard let self else { return false }
+            return self.state.keepExpanded || self.state.isPinned
+                || self.state.pendingApproval != nil || self.state.pendingQuestion != nil
+                || self.state.fileDragOver || self.inAttachDrag || self.attachDragStart != nil
+        }
     }
 
     // MARK: - 60 Hz polling loop
@@ -346,6 +374,7 @@ final class IslandWindowController: NSWindowController {
     }
 
     func expand(to view: IslandView) {
+        if view != .greeting { fsm.openedExternally() }
         state.view = view
         if state.mode == .expanded {
             // Already expanded — just switch view
@@ -355,14 +384,46 @@ final class IslandWindowController: NSWindowController {
         state.lastActivity = .now
     }
 
-    func collapse() {
-        guard fsm.isHeldOpen?() != true else { return }
+    func collapse(force: Bool = false) {
+        guard force || fsm.isHeldOpen?() != true else { return }
         state.isPinned = false
         finishedPinTimer?.cancel()
         // Keep the FSM in step with what is on screen (home/coucou → petit now).
         fsm.collapse()
         setMode(.compact)
         window?.resignKey()
+    }
+
+    // MARK: - Outside clicks
+
+    private func startOutsideClickMonitors() {
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            // AppKit delivers event monitor callbacks on the main thread.
+            MainActor.assumeIsolated {
+                self?.closeIfClickedOutside(at: NSEvent.mouseLocation)
+            }
+        }) {
+            outsideClickMonitors.append(monitor)
+        }
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated {
+                let point = event.window?.convertPoint(toScreen: event.locationInWindow)
+                    ?? NSEvent.mouseLocation
+                self?.closeIfClickedOutside(at: point)
+            }
+            return event
+        }) {
+            outsideClickMonitors.append(monitor)
+        }
+    }
+
+    private func closeIfClickedOutside(at point: CGPoint) {
+        guard state.mode == .expanded, !inAttachDrag, let panel = islandPanel else { return }
+        let local = CGPoint(x: point.x - panel.frame.minX, y: point.y - panel.frame.minY)
+        guard !panel.currentIslandFrame(nw: notchW, nh: notchH).contains(local) else { return }
+        // Explicit dismissal overrides every pin but never answers an agent request.
+        collapse(force: true)
     }
 
     // MARK: - Keyboard (Escape closes)
@@ -402,7 +463,7 @@ final class IslandWindowController: NSWindowController {
 
         // Collapse requests from views (OK button, etc.)
         NotificationCenter.default.addObserver(forName: .islandCollapse, object: nil, queue: .main) { [weak self] _ in
-            self?.collapse()
+            MainActor.assumeIsolated { self?.collapse() }
         }
 
         // .botDizzy — posted by BotEngine.slap() on 3rd hit; show confused view + recover after 3.3s
@@ -710,6 +771,7 @@ final class IslandWindowController: NSWindowController {
 
     func defaultView() -> IslandView {
         if state.pendingApproval != nil { return .approval }
+        if state.pendingQuestion != nil { return .question }
         return state.tasks.isEmpty ? .empty : .overview
     }
 

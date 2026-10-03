@@ -198,6 +198,14 @@ final class AppState: ObservableObject {
     // Short note message (shown in NoteView)
     @Published var noteMessage: String? = nil
 
+    // Notch interaction preferences — persisted.
+    @Published var openOnHover: Bool = true {
+        didSet { UserDefaults.standard.set(openOnHover, forKey: "openOnHover") }
+    }
+    @Published var keepExpanded: Bool = false {
+        didSet { UserDefaults.standard.set(keepExpanded, forKey: "keepExpanded") }
+    }
+
     // Auto-close delay — persisted
     @Published var autoCloseInterval: TimeInterval = 15 {
         didSet { UserDefaults.standard.set(autoCloseInterval, forKey: "autoCloseInterval") }
@@ -337,6 +345,8 @@ final class AppState: ObservableObject {
         if let v = ud.string(forKey: "lmstudioChatModel"), !v.isEmpty { lmstudioChatModel = v }
         if let v = ud.string(forKey: "ollamaServerURL"), !v.isEmpty { ollamaServerURL = v }
         if let v = ud.string(forKey: "lmstudioServerURL"), !v.isEmpty { lmstudioServerURL = v }
+        if let v = ud.object(forKey: "openOnHover") as? Bool { openOnHover = v }
+        if let v = ud.object(forKey: "keepExpanded") as? Bool { keepExpanded = v }
         // Migrate old 60s default → 15s
         if let v = ud.object(forKey: "autoCloseInterval") as? Double {
             autoCloseInterval = (v == 60) ? 15 : v

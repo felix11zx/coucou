@@ -403,7 +403,8 @@ struct CountdownBar: View {
     }
 
     private func updateBar() {
-        guard state.mode == .expanded && !state.isPinned else {
+        guard state.mode == .expanded && !state.isPinned
+                && !state.keepExpanded && !state.openOnHover else {
             barWidth = 0
             return
         }

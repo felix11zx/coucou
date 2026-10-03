@@ -20,6 +20,12 @@ final class IslandStateMachine {
     /// When non-nil and returns true, timers and mouse-leave never auto-collapse or hide the island.
     var isHeldOpen: (() -> Bool)?
 
+    /// Optional hover expansion; disabled here to retain the legacy FSM default.
+    var openOnHover = false
+    /// Short grace period prevents flicker while moving between the notch and its content.
+    var hoverCloseDelay: TimeInterval = 0.25
+    private var mouseInside = false
+
     /// home → petit delay (seconds). Override for debug.
     var homeToPetitDelay: TimeInterval = 15
     /// petit → hidden delay (seconds). Override for debug.
@@ -43,6 +49,12 @@ final class IslandStateMachine {
 
     /// Mouse entered the island notch area
     func mouseEntered() {
+        mouseInside = true
+        if openOnHover && (state == .hidden || state == .petit) {
+            cancelTimers()
+            transition(to: .home)
+            return
+        }
         switch state {
         case .hidden:
             if isHeldOpen?() == true {
@@ -66,6 +78,7 @@ final class IslandStateMachine {
 
     /// Mouse left the island notch area
     func mouseLeft() {
+        mouseInside = false
         switch state {
         case .hidden:
             break
@@ -105,7 +118,7 @@ final class IslandStateMachine {
     /// next hover/mouseLeft behave correctly instead of collapsing the island.
     func openedExternally() {
         cancelTimers()
-        guard state != .home && state != .coucou else { return }
+        guard state != .home else { return }
         state = .home
     }
 
@@ -122,6 +135,11 @@ final class IslandStateMachine {
     /// Schedules auto-collapse. Does not override a longer hover timer already running.
     func greetComplete() {
         guard state == .coucou else { return }
+        if isHeldOpen?() == true || (openOnHover && mouseInside) {
+            cancelTimers()
+            transition(to: .home)
+            return
+        }
         // If mouse entered before this fires (hover timer already running), don't override it
         if greetCollapseWork == nil {
             scheduleGreetCollapse(delay: greetAutoCollapseDelay)
@@ -132,7 +150,7 @@ final class IslandStateMachine {
         greetCollapseWork?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self, self.state == .coucou else { return }
-            self.transition(to: .petit)
+            self.transition(to: self.isHeldOpen?() == true ? .home : .petit)
         }
         greetCollapseWork = item
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
@@ -165,7 +183,8 @@ final class IslandStateMachine {
             self.transition(to: .petit)
         }
         homeCollapseWork = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + homeToPetitDelay, execute: item)
+        let delay = openOnHover ? hoverCloseDelay : homeToPetitDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     func cancelTimers() {
