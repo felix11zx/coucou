@@ -201,12 +201,12 @@ final class IslandWindowController: NSWindowController {
                 self.setMode(.compact)
                 if from == .coucou { self.state.view = self.defaultView() }
                 // Start 60s hide timer if mouse is not currently over the island
-                if !self.wasInIsland { self.fsm.mouseLeft() }
+                if !self.fsm.isMouseInside { self.fsm.mouseLeft() }
 
             case .home:
                 self.expand(to: self.defaultView())
                 // Start collapse timer if mouse not currently hovering
-                if !self.wasInIsland {
+                if !self.fsm.isMouseInside {
                     self.fsm.mouseLeft()
                 }
 
@@ -278,18 +278,20 @@ final class IslandWindowController: NSWindowController {
         if state.mode == .hidden && fsm.state == .petit { fsm.hiddenExternally() }
 
         // Feed FSM hover enter/leave
-        if inIsland && !wasInIsland {
-            guard !inAttachDrag else { wasInIsland = inIsland; return }
+        let previouslyInIsland = wasInIsland
+        // Publish the current hit test before synchronous FSM transitions.
+        wasInIsland = inIsland
+        if inIsland && !previouslyInIsland {
+            guard !inAttachDrag else { return }
             // If in coucou: tell greeting to stay open (tc → infinity)
             if fsm.state == .coucou {
                 NotificationCenter.default.post(name: .greetingHover, object: nil)
             }
             fsm.mouseEntered()
         }
-        if !inIsland && wasInIsland {
+        if !inIsland && previouslyInIsland {
             fsm.mouseLeft()
         }
-        wasInIsland = inIsland
 
         // Bot-head hover (love emote)
         let overBot = state.mode == .expanded && state.stateOverride == nil && isBotHit(local)

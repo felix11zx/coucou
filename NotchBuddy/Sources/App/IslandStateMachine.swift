@@ -24,7 +24,7 @@ final class IslandStateMachine {
     var openOnHover = false
     /// Short grace period prevents flicker while moving between the notch and its content.
     var hoverCloseDelay: TimeInterval = 0.25
-    private var mouseInside = false
+    private(set) var isMouseInside = false
 
     /// home → petit delay (seconds). Override for debug.
     var homeToPetitDelay: TimeInterval = 15
@@ -32,8 +32,6 @@ final class IslandStateMachine {
     var petitToHiddenDelay: TimeInterval = 60
     /// coucou → petit delay after greeting animation ends (no hover). ~0.6s syncs with canvas collapse.
     var greetAutoCollapseDelay: TimeInterval = 0.6
-    /// coucou → petit delay when mouse is hovering over the greeting.
-    var greetHoverCollapseDelay: TimeInterval = 10
 
     private var petitHideWork: DispatchWorkItem?
     private var homeCollapseWork: DispatchWorkItem?
@@ -49,7 +47,8 @@ final class IslandStateMachine {
 
     /// Mouse entered the island notch area
     func mouseEntered() {
-        mouseInside = true
+        isMouseInside = true
+        cancelTimers()
         if openOnHover && (state == .hidden || state == .petit) {
             cancelTimers()
             transition(to: .home)
@@ -71,14 +70,13 @@ final class IslandStateMachine {
             homeCollapseWork?.cancel()
             homeCollapseWork = nil
         case .coucou:
-            // Mouse hovering during greeting — cancel short auto-collapse, extend to hover delay
-            scheduleGreetCollapse(delay: greetHoverCollapseDelay)
+            break // Greeting completion respects hover; no timer closes it underneath the cursor.
         }
     }
 
     /// Mouse left the island notch area
     func mouseLeft() {
-        mouseInside = false
+        isMouseInside = false
         switch state {
         case .hidden:
             break
@@ -88,7 +86,7 @@ final class IslandStateMachine {
             if isHeldOpen?() != true { scheduleHomeCollapse() }
         case .coucou:
             if isHeldOpen?() != true {
-                // Interrupt greeting immediately → compact (overrides 10s auto-collapse)
+                // Interrupt greeting immediately → compact.
                 greetCollapseWork?.cancel(); greetCollapseWork = nil
                 transition(to: .petit)
             }
@@ -132,15 +130,15 @@ final class IslandStateMachine {
     }
 
     /// Greeting animation finished (called at T.end ≈ 4.60 s).
-    /// Schedules auto-collapse. Does not override a longer hover timer already running.
+    /// A hovered greeting becomes the overview, which stays open until mouse-leave.
     func greetComplete() {
         guard state == .coucou else { return }
-        if isHeldOpen?() == true || (openOnHover && mouseInside) {
+        if isHeldOpen?() == true || (openOnHover && isMouseInside) {
             cancelTimers()
             transition(to: .home)
             return
         }
-        // If mouse entered before this fires (hover timer already running), don't override it
+        guard !isMouseInside else { return }
         if greetCollapseWork == nil {
             scheduleGreetCollapse(delay: greetAutoCollapseDelay)
         }
@@ -149,7 +147,7 @@ final class IslandStateMachine {
     private func scheduleGreetCollapse(delay: TimeInterval) {
         greetCollapseWork?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self, self.state == .coucou else { return }
+            guard let self, self.state == .coucou, !self.isMouseInside else { return }
             self.transition(to: self.isHeldOpen?() == true ? .home : .petit)
         }
         greetCollapseWork = item
@@ -161,7 +159,7 @@ final class IslandStateMachine {
         guard state == .hidden else { return }
         cancelTimers()
         transition(to: .petit)
-        schedulePetitHide()
+        if !isMouseInside { schedulePetitHide() }
     }
 
     // MARK: – Timers
@@ -169,7 +167,8 @@ final class IslandStateMachine {
     private func schedulePetitHide() {
         petitHideWork?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self, self.state == .petit, !(self.isHeldOpen?() ?? false) else { return }
+            guard let self, self.state == .petit, !self.isMouseInside,
+                  !(self.isHeldOpen?() ?? false) else { return }
             self.transition(to: .hidden)
         }
         petitHideWork = item
@@ -179,7 +178,8 @@ final class IslandStateMachine {
     private func scheduleHomeCollapse() {
         homeCollapseWork?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self, self.state == .home, !(self.isHeldOpen?() ?? false) else { return }
+            guard let self, self.state == .home, !self.isMouseInside,
+                  !(self.isHeldOpen?() ?? false) else { return }
             self.transition(to: .petit)
         }
         homeCollapseWork = item

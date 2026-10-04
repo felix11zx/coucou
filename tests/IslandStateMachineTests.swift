@@ -18,6 +18,39 @@ enum IslandStateMachineTests {
     }
 
     static func main() async throws {
+        // Regression: opening on hover invokes the controller's transition callback
+        // synchronously, before pollFrame has returned. The callback must already
+        // see the cursor inside and must not synthesize a mouse-leave.
+        let opening = machine()
+        opening.onTransition = { _, to in
+            if to == .home && !opening.isMouseInside { opening.mouseLeft() }
+        }
+        opening.mouseEntered()
+        try await pause(0.2)
+        precondition(opening.state == .home, "Hover-open must survive the close grace period")
+        opening.mouseLeft()
+        try await pause()
+        precondition(opening.state == .petit, "Leaving must still close the hovered island")
+        opening.onTransition = nil
+        opening.cancelTimers()
+
+        // A greeting starts with a pending completion timer, then the cursor enters.
+        let interruptedGreeting = machine()
+        interruptedGreeting.launch()
+        interruptedGreeting.greetComplete()
+        interruptedGreeting.mouseEntered()
+        try await pause()
+        precondition(interruptedGreeting.state == .coucou,
+                     "A queued greeting timer must not close underneath the cursor")
+        interruptedGreeting.greetComplete()
+        precondition(interruptedGreeting.state == .home)
+        try await pause()
+        precondition(interruptedGreeting.state == .home)
+        interruptedGreeting.mouseLeft()
+        try await pause()
+        precondition(interruptedGreeting.state == .petit)
+        interruptedGreeting.cancelTimers()
+
         // Disabled hover preserves compact-on-hover and click-to-open.
         let legacy = machine(hover: false)
         legacy.mouseEntered()
